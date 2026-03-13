@@ -146,6 +146,7 @@ static void prompt_filter(WINDOW *win, struct filter_rule *f, int y, int width)
 {
     echo();
     curs_set(1);
+    nodelay(win, FALSE);
     char input[128];
 
     wattron(win, COLOR_PAIR(COLOR_FILTER));
@@ -188,6 +189,7 @@ static void prompt_filter(WINDOW *win, struct filter_rule *f, int y, int width)
 
     noecho();
     curs_set(0);
+    nodelay(win, TRUE);
 }
 
 static void prompt_export(WINDOW *win, struct packet_buffer *buf,
@@ -195,6 +197,7 @@ static void prompt_export(WINDOW *win, struct packet_buffer *buf,
 {
     echo();
     curs_set(1);
+    nodelay(win, FALSE);
     char filename[256];
 
     wattron(win, COLOR_PAIR(COLOR_FILTER));
@@ -206,6 +209,7 @@ static void prompt_export(WINDOW *win, struct packet_buffer *buf,
     wgetnstr(win, filename, sizeof(filename) - 1);
     noecho();
     curs_set(0);
+    nodelay(win, TRUE);
 
     if (filename[0] == '\0')
         return;
