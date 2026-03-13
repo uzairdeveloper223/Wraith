@@ -1,0 +1,65 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: install deps
+        run: sudo apt-get install -y libncurses-dev
+
+      - name: build
+        run: make
+
+      - name: package
+        run: |
+          tar -czf wraith-${{ github.ref_name }}-linux-x86_64.tar.gz wraith README.md
+
+      - name: release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "wraith ${{ github.ref_name }}"
+          body: |
+            ## wraith ${{ github.ref_name }}
+
+            A silent, low-level TUI packet sniffer built in C.
+            Captures and dissects raw network traffic directly from the kernel.
+
+            ### features
+            - raw socket capture via `AF_PACKET` / `SOCK_RAW` — zero external capture deps
+            - manual parsing of Ethernet, IP, TCP, UDP, and ICMP headers
+            - extracts src/dst IP, ports, protocol, payload size, TTL, TCP flags
+            - threaded capture with a lock-protected shared packet buffer
+            - ncurses TUI — scrollable, color-coded packet list with live protocol stats
+            - filter by IP, port, or protocol on the fly
+            - DNS reverse resolution on any selected packet
+            - export captured packets to a text file
+
+            ### install
+            ```bash
+            tar -xzf wraith-${{ github.ref_name }}-linux-x86_64.tar.gz
+            sudo install -m755 wraith /usr/local/bin/wraith
+            ```
+
+            ### run
+            ```bash
+            sudo wraith
+            ```
+
+            > requires root — raw sockets need `CAP_NET_RAW`
+          files: wraith-${{ github.ref_name }}-linux-x86_64.tar.gz
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

@@ -4,6 +4,7 @@ A silent, low-level TUI packet sniffer built in C. No libs, no noise, just raw p
 
 ![License](https://img.shields.io/badge/license-GPLv2-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux-green)
+![Latest Release](https://img.shields.io/github/v/release/uzairdeveloper223/wraith)
 
 ## Features
 
@@ -17,6 +18,24 @@ A silent, low-level TUI packet sniffer built in C. No libs, no noise, just raw p
 - Filter packets by IP, port, or protocol
 - DNS name resolution on selected packets
 - Export captured packets to a text file
+
+## Download
+
+Grab the latest pre-built binary from [Releases](https://github.com/uzairdeveloper223/wraith/releases/latest).
+
+```bash
+tar -xzf wraith-<version>-linux-x86_64.tar.gz
+sudo install -m755 wraith /usr/local/bin/wraith
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/uzairdeveloper223/wraith.git
+cd wraith
+make
+sudo ./wraith
+```
 
 ## Requirements
 
