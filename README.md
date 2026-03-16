@@ -4,7 +4,7 @@ A silent, low-level TUI packet sniffer built in C. No libs, no noise, just raw p
 
 ![License](https://img.shields.io/badge/license-GPLv2-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux-green)
-![Latest Release](https://img.shields.io/github/v/release/uzairdeveloper223/wraith)
+![Latest Release](https://img.shields.io/github/v/release/uzairdeveloper223/Wraith)
 
 ## Features
 
