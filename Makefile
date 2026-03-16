@@ -1,9 +1,9 @@
 CC      = gcc
 CFLAGS  = -Wall -Wextra -O2 -DVERSION=\"$(VERSION)\"
-LDFLAGS = -lncurses -lpthread
+LDFLAGS = -lncurses -lpthread -lcurl
 VERSION = $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
-SRC = src/main.c src/packet.c src/buffer.c src/capture.c src/filter.c src/dns.c src/export.c src/ui.c
+SRC = src/main.c src/packet.c src/buffer.c src/capture.c src/filter.c src/dns.c src/export.c src/ui.c src/geo.c src/map.c
 OBJ = $(SRC:.c=.o)
 BIN = wraith
 

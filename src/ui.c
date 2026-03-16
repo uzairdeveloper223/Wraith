@@ -1,6 +1,8 @@
 #include "ui.h"
 #include "export.h"
 #include "dns.h"
+#include "geo.h"
+#include "map.h"
 #include <ncurses.h>
 #include <arpa/inet.h>
 #include <string.h>
@@ -15,6 +17,7 @@
 #define COLOR_HEADER 5
 #define COLOR_STATUS 6
 #define COLOR_FILTER 7
+#define COLOR_MAP_BASE 8
 
 static void draw_header(WINDOW *win, int width)
 {
@@ -132,13 +135,97 @@ static void draw_packet_row(WINDOW *win, int y, int idx, const struct packet_inf
         wattroff(win, A_REVERSE);
 }
 
-static void draw_help(WINDOW *win, int y, int width)
+static void draw_help(WINDOW *win, int y, int width, int map_enabled)
 {
     wattron(win, COLOR_PAIR(COLOR_STATUS));
     mvwhline(win, y, 0, ' ', width);
-    mvwprintw(win, y, 2,
-              "q:Quit  f:Filter  c:Clear filter  e:Export  d:DNS lookup  "
-              "Up/Down:Scroll  PgUp/PgDn:Page");
+    if (map_enabled) {
+        mvwprintw(win, y, 2,
+                  "q:Quit  m:Toggle map  f:Filter  c:Clear  e:Export  d:DNS  "
+                  "Up/Down:Scroll");
+    } else {
+        mvwprintw(win, y, 2,
+                  "q:Quit  m:Toggle map  f:Filter  c:Clear  e:Export  d:DNS  "
+                  "Up/Down:Scroll  PgUp/PgDn:Page");
+    }
+    wattroff(win, COLOR_PAIR(COLOR_STATUS));
+}
+
+static void draw_map_header(WINDOW *win, int y, int width, struct map_ctx *map_ctx, struct geo_ctx *geo_ctx __attribute__((unused)))
+{
+    int unique_countries = 0;
+    char seen_countries[MAP_POINTS_MAX][GEO_COUNTRY_LEN];
+    int seen_count = 0;
+    
+    for (int i = 0; i < map_ctx->count; i++) {
+        int idx = (map_ctx->head - map_ctx->count + i + MAP_POINTS_MAX) % MAP_POINTS_MAX;
+        struct map_point *pt = &map_ctx->points[idx];
+        if (!pt->active || !pt->geo.country[0])
+            continue;
+        
+        int found = 0;
+        for (int j = 0; j < seen_count; j++) {
+            if (strcmp(seen_countries[j], pt->geo.country) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found && seen_count < MAP_POINTS_MAX) {
+            strncpy(seen_countries[seen_count], pt->geo.country, GEO_COUNTRY_LEN - 1);
+            seen_countries[seen_count][GEO_COUNTRY_LEN - 1] = '\0';
+            seen_count++;
+        }
+    }
+    unique_countries = seen_count;
+    
+    wattron(win, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
+    mvwhline(win, y, 0, ' ', width);
+    mvwprintw(win, y, 2, "LIVE TRAFFIC MAP | %d countries | %d located",
+              unique_countries, map_ctx->total_packets);
+    wattroff(win, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
+}
+
+static void draw_map_ticker(WINDOW *win, int y, int width, struct map_ctx *map_ctx, int ticker_offset)
+{
+    wattron(win, COLOR_PAIR(COLOR_STATUS));
+    mvwhline(win, y, 0, ' ', width);
+    
+    char ticker[2048] = "";
+    int ticker_len = 0;
+    int display_count = map_ctx->count < 5 ? map_ctx->count : 5;
+    
+    for (int i = 0; i < display_count; i++) {
+        int idx = (map_ctx->head - 1 - i + MAP_POINTS_MAX) % MAP_POINTS_MAX;
+        if (idx < 0)
+            continue;
+        struct map_point *pt = &map_ctx->points[idx];
+        if (!pt->active)
+            continue;
+        
+        char entry[256];
+        snprintf(entry, sizeof(entry), " [--:--:--] %s, %s (%s)  ",
+                 pt->geo.city[0] ? pt->geo.city : "Unknown",
+                 pt->geo.country[0] ? pt->geo.country : "Unknown",
+                 pt->geo.isp[0] ? pt->geo.isp : "Unknown");
+        
+        int entry_len = strlen(entry);
+        if (ticker_len + entry_len < (int)sizeof(ticker) - 1) {
+            strcat(ticker, entry);
+            ticker_len += entry_len;
+        }
+    }
+    
+    if (ticker_len > 0) {
+        int visible_width = width - 4;
+        int start_pos = ticker_offset % ticker_len;
+        
+        int x = 2;
+        for (int i = 0; i < visible_width && i < ticker_len; i++) {
+            int pos = (start_pos + i) % ticker_len;
+            mvwaddch(win, y, x + i, ticker[pos]);
+        }
+    }
+    
     wattroff(win, COLOR_PAIR(COLOR_STATUS));
 }
 
@@ -267,14 +354,27 @@ int ui_run(struct packet_buffer *buf, struct capture_ctx *cap)
     init_pair(COLOR_HEADER, COLOR_BLACK, COLOR_WHITE);
     init_pair(COLOR_STATUS, COLOR_BLACK, COLOR_GREEN);
     init_pair(COLOR_FILTER, COLOR_BLACK, COLOR_CYAN);
+    init_pair(COLOR_MAP_BASE, COLOR_WHITE, -1);
 
     struct filter_rule filter;
     filter_init(&filter);
+
+    struct geo_ctx geo;
+    if (geo_init(&geo) != 0) {
+        endwin();
+        return -1;
+    }
+
+    struct map_ctx map;
+    map_init(&map);
 
     int scroll_pos = 0;
     int selected = 0;
     int last_count = 0;
     int autoscroll = 1;
+    int map_enabled = 0;
+    int ticker_offset = 0;
+    int last_processed = 0;
 
     while (cap->running) {
         int height, width;
@@ -286,8 +386,23 @@ int ui_run(struct packet_buffer *buf, struct capture_ctx *cap)
         int list_start = 4;
         int list_end = height - 2;
         int help_y = height - 1;
-        int visible = list_end - list_start;
+        
+        int map_header_y = 0;
+        int map_start_y = 0;
+        int map_ticker_y = 0;
 
+        if (map_enabled) {
+            int map_panel_height = (height * 40) / 100;
+            if (map_panel_height < MAP_HEIGHT + 3)
+                map_panel_height = MAP_HEIGHT + 3;
+            
+            list_end = height - map_panel_height - 1;
+            map_header_y = list_end;
+            map_start_y = map_header_y + 1;
+            map_ticker_y = map_start_y + MAP_HEIGHT;
+        }
+
+        int visible = list_end - list_start;
         if (visible < 1)
             visible = 1;
 
@@ -297,9 +412,23 @@ int ui_run(struct packet_buffer *buf, struct capture_ctx *cap)
         draw_stats(stdscr, buf, stats_y, width);
         draw_filter_bar(stdscr, &filter, filter_y, width);
         draw_column_header(stdscr, colhdr_y);
-        draw_help(stdscr, help_y, width);
+        draw_help(stdscr, help_y, width, map_enabled);
 
         int count = buffer_count(buf);
+
+        for (int i = last_processed; i < count; i++) {
+            struct packet_info pkt = {0};
+            if (!buffer_get(buf, i, &pkt))
+                continue;
+            
+            geo_enqueue(&geo, pkt.dst_ip);
+            
+            struct geo_result geo_result = {0};
+            if (geo_lookup(&geo, pkt.dst_ip, &geo_result) == 0) {
+                map_add_point(&map, &geo_result, pkt.protocol);
+            }
+        }
+        last_processed = count;
 
         int filtered_indices[BUFFER_CAPACITY];
         int filtered_count = 0;
@@ -333,6 +462,19 @@ int ui_run(struct packet_buffer *buf, struct capture_ctx *cap)
                             &pkt, width, (scroll_pos + i) == selected);
         }
 
+        if (map_enabled) {
+            draw_map_header(stdscr, map_header_y, width, &map, &geo);
+            
+            int map_x_offset = (width - MAP_WIDTH) / 2;
+            if (map_x_offset < 0)
+                map_x_offset = 0;
+            
+            map_draw(stdscr, map_start_y, map_x_offset, &map);
+            
+            draw_map_ticker(stdscr, map_ticker_y, width, &map, ticker_offset);
+            ticker_offset++;
+        }
+
         refresh();
 
         int ch = getch();
@@ -340,6 +482,10 @@ int ui_run(struct packet_buffer *buf, struct capture_ctx *cap)
         case 'q':
         case 'Q':
             capture_stop(cap);
+            break;
+        case 'm':
+        case 'M':
+            map_enabled = !map_enabled;
             break;
         case KEY_UP:
         case 'k':
@@ -406,6 +552,7 @@ int ui_run(struct packet_buffer *buf, struct capture_ctx *cap)
         napms(50);
     }
 
+    geo_destroy(&geo);
     endwin();
     return 0;
 }
