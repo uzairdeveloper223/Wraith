@@ -58,7 +58,7 @@ static int cache_get(struct geo_ctx *ctx, struct in_addr ip, struct geo_result *
 {
     unsigned int bucket = hash_ip(ip);
     struct geo_cache_entry *entry = &ctx->cache[bucket];
-    
+
     while (entry) {
         if (entry->occupied && entry->ip.s_addr == ip.s_addr) {
             if (out)
@@ -67,7 +67,7 @@ static int cache_get(struct geo_ctx *ctx, struct in_addr ip, struct geo_result *
         }
         entry = entry->next;
     }
-    
+
     return 0;
 }
 
@@ -75,7 +75,7 @@ static void cache_put(struct geo_ctx *ctx, struct in_addr ip, const struct geo_r
 {
     unsigned int bucket = hash_ip(ip);
     struct geo_cache_entry *entry = &ctx->cache[bucket];
-    
+
     if (!entry->occupied) {
         entry->ip = ip;
         entry->result = *result;
@@ -83,7 +83,7 @@ static void cache_put(struct geo_ctx *ctx, struct in_addr ip, const struct geo_r
         entry->next = NULL;
         return;
     }
-    
+
     while (entry) {
         if (entry->ip.s_addr == ip.s_addr) {
             entry->result = *result;
@@ -299,7 +299,7 @@ void geo_destroy(struct geo_ctx *ctx)
 {
     ctx->running = 0;
     pthread_join(ctx->worker, NULL);
-    
+
     for (int i = 0; i < GEO_CACHE_SIZE; i++) {
         struct geo_cache_entry *entry = ctx->cache[i].next;
         while (entry) {
@@ -307,8 +307,10 @@ void geo_destroy(struct geo_ctx *ctx)
             free(entry);
             entry = next;
         }
+        ctx->cache[i].next = NULL;
+        ctx->cache[i].occupied = 0;
     }
-    
+
     pthread_mutex_destroy(&ctx->lock);
 }
 
@@ -328,21 +330,21 @@ void geo_enqueue(struct geo_ctx *ctx, struct in_addr ip)
 {
     if (is_private_ip(ip))
         return;
-    
+
     pthread_mutex_lock(&ctx->lock);
-    
+
     int cached = cache_get(ctx, ip, NULL);
     if (cached) {
         pthread_mutex_unlock(&ctx->lock);
         return;
     }
-    
+
     int next_tail = (ctx->queue_tail + 1) % GEO_QUEUE_SIZE;
     if (next_tail != ctx->queue_head) {
         ctx->queue[ctx->queue_tail].ip = ip;
         ctx->queue[ctx->queue_tail].valid = 1;
         ctx->queue_tail = next_tail;
     }
-    
+
     pthread_mutex_unlock(&ctx->lock);
 }

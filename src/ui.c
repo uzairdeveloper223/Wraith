@@ -18,6 +18,11 @@
 #define COLOR_STATUS 6
 #define COLOR_FILTER 7
 #define COLOR_MAP_BASE 8
+#define COLOR_SELECTED 9
+#define COLOR_MAP_TCP 10
+#define COLOR_MAP_UDP 11
+#define COLOR_MAP_ICMP 12
+#define COLOR_MAP_OTHER 13
 
 static void draw_header(WINDOW *win, int width)
 {
@@ -26,6 +31,8 @@ static void draw_header(WINDOW *win, int width)
     mvwprintw(win, 0, 2, " WRAITH ");
     mvwprintw(win, 0, 12, "| Silent Packet Sniffer");
     wattroff(win, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
+    mvwvline(win, 1, 0, ACS_VLINE, width - 1);
+    mvwvline(win, 1, width - 1, ACS_VLINE, width - 1);
 }
 
 static int color_for_proto(uint8_t proto)
@@ -38,7 +45,7 @@ static int color_for_proto(uint8_t proto)
     }
 }
 
-static void draw_stats(WINDOW *win, struct packet_buffer *buf, int y, int width __attribute__((unused)))
+static void draw_stats(WINDOW *win, struct packet_buffer *buf, int y, int width)
 {
     int tcp, udp, icmp, other;
     buffer_stats(buf, &tcp, &udp, &icmp, &other);
@@ -49,26 +56,30 @@ static void draw_stats(WINDOW *win, struct packet_buffer *buf, int y, int width 
     wattroff(win, A_BOLD);
 
     wattron(win, COLOR_PAIR(COLOR_TCP));
-    mvwprintw(win, y, 20, "TCP: %d", tcp);
+    mvwprintw(win, y, 18, "[TCP: %d]", tcp);
     wattroff(win, COLOR_PAIR(COLOR_TCP));
 
     wattron(win, COLOR_PAIR(COLOR_UDP));
-    mvwprintw(win, y, 34, "UDP: %d", udp);
+    mvwprintw(win, y, 32, "[UDP: %d]", udp);
     wattroff(win, COLOR_PAIR(COLOR_UDP));
 
     wattron(win, COLOR_PAIR(COLOR_ICMP));
-    mvwprintw(win, y, 48, "ICMP: %d", icmp);
+    mvwprintw(win, y, 46, "[ICMP: %d]", icmp);
     wattroff(win, COLOR_PAIR(COLOR_ICMP));
 
     wattron(win, COLOR_PAIR(COLOR_OTHER));
-    mvwprintw(win, y, 62, "Other: %d", other);
+    mvwprintw(win, y, 60, "[OTH: %d]", other);
     wattroff(win, COLOR_PAIR(COLOR_OTHER));
+
+    (void)width;
 }
 
 static void draw_filter_bar(WINDOW *win, const struct filter_rule *f, int y, int width)
 {
     wattron(win, COLOR_PAIR(COLOR_FILTER));
     mvwhline(win, y, 0, ' ', width);
+    mvwaddch(win, y, 0, ACS_LTEE);
+    mvwaddch(win, y, width - 1, ACS_RTEE);
     if (f->active) {
         mvwprintw(win, y, 2, "FILTER:");
         int x = 10;
@@ -91,12 +102,13 @@ static void draw_filter_bar(WINDOW *win, const struct filter_rule *f, int y, int
 
 static void draw_column_header(WINDOW *win, int y)
 {
-    wattron(win, A_BOLD | A_UNDERLINE);
+    wattron(win, A_BOLD);
     mvwprintw(win, y, 1,
               "%-5s %-12s %-15s %-6s %-15s %-6s %-5s %-5s %-7s %s",
               "No.", "Time", "Source", "SPort", "Destination", "DPort",
               "Proto", "Len", "Payload", "Flags/Info");
-    wattroff(win, A_BOLD | A_UNDERLINE);
+    wattroff(win, A_BOLD);
+    mvwhline(win, y + 1, 1, ACS_HLINE, 95);
 }
 
 static void draw_packet_row(WINDOW *win, int y, int idx, const struct packet_info *pkt, int width, int selected)
@@ -119,34 +131,37 @@ static void draw_packet_row(WINDOW *win, int y, int idx, const struct packet_inf
         snprintf(info, sizeof(info), "type=%d code=%d", pkt->icmp_type, pkt->icmp_code);
     }
 
-    if (selected)
-        wattron(win, A_REVERSE);
+    if (selected) {
+        wattron(win, COLOR_PAIR(COLOR_SELECTED) | A_BOLD);
+        mvwhline(win, y, 0, ' ', width);
+    } else {
+        wattron(win, COLOR_PAIR(color_for_proto(pkt->protocol)));
+    }
 
-    wattron(win, COLOR_PAIR(color_for_proto(pkt->protocol)));
-    mvwhline(win, y, 0, ' ', width);
     mvwprintw(win, y, 1,
               "%-5d %-12s %-15s %-6u %-15s %-6u %-5s %-5u %-7u %s",
               idx + 1, timestr, src, pkt->src_port, dst, pkt->dst_port,
               protocol_name(pkt->protocol), pkt->total_len,
               pkt->payload_len, info);
-    wattroff(win, COLOR_PAIR(color_for_proto(pkt->protocol)));
 
     if (selected)
-        wattroff(win, A_REVERSE);
+        wattroff(win, COLOR_PAIR(COLOR_SELECTED) | A_BOLD);
+    else
+        wattroff(win, COLOR_PAIR(color_for_proto(pkt->protocol)));
 }
 
 static void draw_help(WINDOW *win, int y, int width, int map_enabled)
 {
     wattron(win, COLOR_PAIR(COLOR_STATUS));
     mvwhline(win, y, 0, ' ', width);
+    mvwaddch(win, y, 0, ACS_LLCORNER);
+    mvwaddch(win, y, width - 1, ACS_LRCORNER);
     if (map_enabled) {
         mvwprintw(win, y, 2,
-                  "q:Quit  m:Toggle map  f:Filter  c:Clear  e:Export  d:DNS  "
-                  "Up/Down:Scroll");
+                  " q:Quit  m:Toggle map  f:Filter  c:Clear  e:Export  d:DNS  Up/Down:Scroll ");
     } else {
         mvwprintw(win, y, 2,
-                  "q:Quit  m:Toggle map  f:Filter  c:Clear  e:Export  d:DNS  "
-                  "Up/Down:Scroll  PgUp/PgDn:Page");
+                  " q:Quit  m:Toggle map  f:Filter  c:Clear  e:Export  d:DNS  Up/Down:Scroll  PgUp/PgDn:Page ");
     }
     wattroff(win, COLOR_PAIR(COLOR_STATUS));
 }
@@ -156,13 +171,13 @@ static void draw_map_header(WINDOW *win, int y, int width, struct map_ctx *map_c
     int unique_countries = 0;
     char seen_countries[MAP_POINTS_MAX][GEO_COUNTRY_LEN];
     int seen_count = 0;
-    
+
     for (int i = 0; i < map_ctx->count; i++) {
         int idx = (map_ctx->head - map_ctx->count + i + MAP_POINTS_MAX) % MAP_POINTS_MAX;
         struct map_point *pt = &map_ctx->points[idx];
         if (!pt->active || !pt->geo.country[0])
             continue;
-        
+
         int found = 0;
         for (int j = 0; j < seen_count; j++) {
             if (strcmp(seen_countries[j], pt->geo.country) == 0) {
@@ -177,10 +192,12 @@ static void draw_map_header(WINDOW *win, int y, int width, struct map_ctx *map_c
         }
     }
     unique_countries = seen_count;
-    
+
     wattron(win, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
     mvwhline(win, y, 0, ' ', width);
-    mvwprintw(win, y, 2, "LIVE TRAFFIC MAP | %d countries | %d located",
+    mvwaddch(win, y, 0, ACS_ULCORNER);
+    mvwaddch(win, y, width - 1, ACS_URCORNER);
+    mvwprintw(win, y, 2, " LIVE TRAFFIC MAP | %d countries | %d packets | * recent @ active ",
               unique_countries, map_ctx->total_packets);
     wattroff(win, COLOR_PAIR(COLOR_HEADER) | A_BOLD);
 }
@@ -189,11 +206,11 @@ static void draw_map_ticker(WINDOW *win, int y, int width, struct map_ctx *map_c
 {
     wattron(win, COLOR_PAIR(COLOR_STATUS));
     mvwhline(win, y, 0, ' ', width);
-    
+
     char ticker[2048] = "";
     int ticker_len = 0;
     int display_count = map_ctx->count < 5 ? map_ctx->count : 5;
-    
+
     for (int i = 0; i < display_count; i++) {
         int idx = (map_ctx->head - 1 - i + MAP_POINTS_MAX) % MAP_POINTS_MAX;
         if (idx < 0)
@@ -201,31 +218,34 @@ static void draw_map_ticker(WINDOW *win, int y, int width, struct map_ctx *map_c
         struct map_point *pt = &map_ctx->points[idx];
         if (!pt->active)
             continue;
-        
+
         char entry[256];
-        snprintf(entry, sizeof(entry), " [--:--:--] %s, %s (%s)  ",
+        int entry_len = snprintf(entry, sizeof(entry), " [--:--:--] %s, %s (%s)  ",
                  pt->geo.city[0] ? pt->geo.city : "Unknown",
                  pt->geo.country[0] ? pt->geo.country : "Unknown",
                  pt->geo.isp[0] ? pt->geo.isp : "Unknown");
-        
-        int entry_len = strlen(entry);
-        if (ticker_len + entry_len < (int)sizeof(ticker) - 1) {
-            strcat(ticker, entry);
-            ticker_len += entry_len;
-        }
+
+        if (entry_len < 0)
+            continue;
+
+        if (ticker_len + entry_len >= (int)sizeof(ticker) - 1)
+            break;
+
+        strcat(ticker, entry);
+        ticker_len += entry_len;
     }
-    
+
     if (ticker_len > 0) {
         int visible_width = width - 4;
         int start_pos = ticker_offset % ticker_len;
-        
+
         int x = 2;
         for (int i = 0; i < visible_width && i < ticker_len; i++) {
             int pos = (start_pos + i) % ticker_len;
             mvwaddch(win, y, x + i, ticker[pos]);
         }
     }
-    
+
     wattroff(win, COLOR_PAIR(COLOR_STATUS));
 }
 
@@ -242,7 +262,12 @@ static void prompt_filter(WINDOW *win, struct filter_rule *f, int y, int width)
     wattroff(win, COLOR_PAIR(COLOR_FILTER));
     wrefresh(win);
 
-    wgetnstr(win, input, sizeof(input) - 1);
+    if (wgetnstr(win, input, sizeof(input) - 1) == ERR) {
+        noecho();
+        curs_set(0);
+        nodelay(win, TRUE);
+        return;
+    }
     strncpy(f->ip, input, sizeof(f->ip) - 1);
     f->ip[sizeof(f->ip) - 1] = '\0';
 
@@ -252,12 +277,21 @@ static void prompt_filter(WINDOW *win, struct filter_rule *f, int y, int width)
     wattroff(win, COLOR_PAIR(COLOR_FILTER));
     wrefresh(win);
 
-    wgetnstr(win, input, sizeof(input) - 1);
+    if (wgetnstr(win, input, sizeof(input) - 1) == ERR) {
+        noecho();
+        curs_set(0);
+        nodelay(win, TRUE);
+        return;
+    }
     if (input[0] == '\0' || input[0] == '\n') {
         f->port = -1;
     } else {
-        long p = strtol(input, NULL, 10);
-        f->port = (p >= 0 && p <= 65535) ? (int)p : -1;
+        char *endptr;
+        long p = strtol(input, &endptr, 10);
+        if (*endptr == '\0' || *endptr == '\n')
+            f->port = (p >= 0 && p <= 65535) ? (int)p : -1;
+        else
+            f->port = -1;
     }
 
     mvwhline(win, y, 0, ' ', width);
@@ -266,7 +300,12 @@ static void prompt_filter(WINDOW *win, struct filter_rule *f, int y, int width)
     wattroff(win, COLOR_PAIR(COLOR_FILTER));
     wrefresh(win);
 
-    wgetnstr(win, input, sizeof(input) - 1);
+    if (wgetnstr(win, input, sizeof(input) - 1) == ERR) {
+        noecho();
+        curs_set(0);
+        nodelay(win, TRUE);
+        return;
+    }
     f->protocol = -1;
     if (strcasecmp(input, "tcp") == 0) f->protocol = PROTO_TCP;
     else if (strcasecmp(input, "udp") == 0) f->protocol = PROTO_UDP;
@@ -293,7 +332,12 @@ static void prompt_export(WINDOW *win, struct packet_buffer *buf,
     wattroff(win, COLOR_PAIR(COLOR_FILTER));
     wrefresh(win);
 
-    wgetnstr(win, filename, sizeof(filename) - 1);
+    if (wgetnstr(win, filename, sizeof(filename) - 1) == ERR) {
+        noecho();
+        curs_set(0);
+        nodelay(win, TRUE);
+        return;
+    }
     noecho();
     curs_set(0);
     nodelay(win, TRUE);
@@ -355,6 +399,11 @@ int ui_run(struct packet_buffer *buf, struct capture_ctx *cap)
     init_pair(COLOR_STATUS, COLOR_BLACK, COLOR_GREEN);
     init_pair(COLOR_FILTER, COLOR_BLACK, COLOR_CYAN);
     init_pair(COLOR_MAP_BASE, COLOR_WHITE, -1);
+    init_pair(COLOR_SELECTED, COLOR_BLACK, COLOR_WHITE);
+    init_pair(COLOR_MAP_TCP, COLOR_GREEN, -1);
+    init_pair(COLOR_MAP_UDP, COLOR_CYAN, -1);
+    init_pair(COLOR_MAP_ICMP, COLOR_YELLOW, -1);
+    init_pair(COLOR_MAP_OTHER, COLOR_MAGENTA, -1);
 
     struct filter_rule filter;
     filter_init(&filter);

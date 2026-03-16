@@ -25,7 +25,7 @@ static const char *map_rows[MAP_HEIGHT] = {
     "                     #######           #####                  # #       ",
     "                      ######           ####  #              ######      ",
     "                      ####             ###                 ########     ",
-    "                     ####                                       ##      ",
+    "                     ##                                       ##      ",
     "                     ##                                              #  ",
     "                     #                                                  ",
     "                                                                        ",
@@ -83,7 +83,7 @@ void map_draw(WINDOW *win, int y_offset, int x_offset, struct map_ctx *ctx)
     char display[MAP_HEIGHT][MAP_WIDTH + 1];
     int colors[MAP_HEIGHT][MAP_WIDTH];
     int blink[MAP_HEIGHT][MAP_WIDTH];
-    
+
     for (int y = 0; y < MAP_HEIGHT; y++) {
         memcpy(display[y], map_rows[y], MAP_WIDTH);
         display[y][MAP_WIDTH] = '\0';
@@ -92,47 +92,51 @@ void map_draw(WINDOW *win, int y_offset, int x_offset, struct map_ctx *ctx)
             blink[y][x] = 0;
         }
     }
-    
+
     int hit_count[MAP_HEIGHT][MAP_WIDTH];
     memset(hit_count, 0, sizeof(hit_count));
-    
+
     int most_recent_idx = (ctx->head - 1 + MAP_POINTS_MAX) % MAP_POINTS_MAX;
-    
+
     for (int i = 0; i < ctx->count; i++) {
         int idx = (ctx->head - ctx->count + i + MAP_POINTS_MAX) % MAP_POINTS_MAX;
         struct map_point *pt = &ctx->points[idx];
-        
+
         if (!pt->active)
             continue;
-        
+
         int x, y;
         map_latlon_to_xy(pt->geo.lat, pt->geo.lon, MAP_WIDTH, MAP_HEIGHT, &x, &y);
-        
+
         hit_count[y][x]++;
         colors[y][x] = color_for_proto(pt->protocol);
-        
+
         if (idx == most_recent_idx && ctx->count > 0)
             blink[y][x] = 1;
     }
-    
+
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             if (hit_count[y][x] > 0) {
                 if (hit_count[y][x] == 1)
                     display[y][x] = '*';
+                else if (hit_count[y][x] < 5)
+                    display[y][x] = '+';
                 else
                     display[y][x] = '@';
             }
         }
     }
-    
+
     for (int y = 0; y < MAP_HEIGHT; y++) {
         wmove(win, y_offset + y, x_offset);
         for (int x = 0; x < MAP_WIDTH; x++) {
             int attr = COLOR_PAIR(colors[y][x]);
             if (blink[y][x] && hit_count[y][x] > 0)
-                attr |= A_BLINK;
-            
+                attr |= A_BLINK | A_BOLD;
+            else if (hit_count[y][x] > 0)
+                attr |= A_BOLD;
+
             wattron(win, attr);
             waddch(win, display[y][x]);
             wattroff(win, attr);
