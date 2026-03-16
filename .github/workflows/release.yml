@@ -45,6 +45,7 @@ jobs:
             - threaded capture with a lock-protected shared packet buffer
             - ncurses TUI — scrollable, color-coded packet list with live protocol stats
             - filter by IP, port, or protocol on the fly
+            - live traffic map with geo-IP visualization
             - DNS reverse resolution on any selected packet
             - export captured packets to a text file
 

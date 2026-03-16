@@ -15,6 +15,7 @@ A silent, low-level TUI packet sniffer built in C. No libs, no noise, just raw p
 - Threaded capture with shared lock-protected packet buffer
 - ncurses TUI with scrollable, color-coded packet list
 - Live stats panel (packet counts per protocol)
+- Live traffic map with geo-IP visualization
 - Filter packets by IP, port, or protocol
 - DNS name resolution on selected packets
 - Export captured packets to a text file
@@ -66,6 +67,7 @@ sudo ./wraith
 | `PgUp` | Page up |
 | `PgDn` | Page down |
 | `G` | Resume autoscroll |
+| `m` | Toggle live traffic map |
 | `f` | Set filter (IP / port / protocol) |
 | `c` | Clear filter |
 | `e` | Export packets to file |
@@ -90,6 +92,8 @@ src/
 ├── capture.c/h  — raw socket setup and capture thread
 ├── filter.c/h   — packet filtering by IP/port/protocol
 ├── dns.c/h      — DNS reverse resolution
+├── geo.c/h      — geo-IP lookup and caching
+├── map.c/h      — live traffic map visualization
 ├── export.c/h   — export packets to text file
 └── ui.c/h       — ncurses TUI
 ```
